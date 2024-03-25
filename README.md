@@ -1,6 +1,6 @@
 # UPDATE :
 ## Contribution of Chinmay Lohani towards the parent project.
-### Not safe (will update the attack code soon)
+### Not safe (will update the exploit code soon)
 
 
 # JMessage Overview
