@@ -1,3 +1,8 @@
+# UPDATE :
+## Contribution of Chinmay Lohani towards the parent project.
+### Not safe (will update the attack code soon)
+
+
 # JMessage Overview
 
 This repository contains code and specifications for the JMessage system.
