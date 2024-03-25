@@ -411,10 +411,22 @@ func doReadAndSendMessage(recipient string, messageBody string) error {
 }
 
 // Request a key from the server
-func getKeyFromServer(user_key string) {
-	geturl := serverProtocol + "://" + serverDomain + ":" + strconv.Itoa(serverPort) + "/lookupKey?" + user_key
+func getKeyFromServer(user_key string) []byte {
+	geturl := serverProtocol + "://" + serverDomainAndPort + "/lookupKey/" + user_key
 
-	fmt.Println(geturl)
+	// Make the request to the server
+	code, body, err := doGetRequest(geturl)
+
+	// fmt.Println(code, "\n-------------\n", body, "\n-------------\n", err)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if code != 200 {
+		log.Fatal(err)
+	}
+	return body
 }
 
 // Upload a new public key to the server
@@ -639,20 +651,7 @@ func decryptMessages(messageArray []MessageStruct) {
 	// TODO: IMPLEMENT
 
 	for _, msg := range messageArray {
-		geturl := serverProtocol + "://" + serverDomainAndPort + "/lookupKey/" + msg.From
-
-		// Make the request to the server
-		code, body, err := doGetRequest(geturl)
-
-		// fmt.Println(code, "\n-------------\n", body, "\n-------------\n", err)
-
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		if code != 200 {
-			log.Fatal(err)
-		}
+		body := getKeyFromServer(msg.From)
 
 		var result PubKeyStruct
 		if err := json.Unmarshal(body, &result); err != nil { // Parse []byte to go struct pointer
