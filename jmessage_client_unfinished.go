@@ -11,6 +11,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -466,15 +467,19 @@ func decodePrivateSigningKey(privKey PrivKeyStruct) ecdsa.PrivateKey {
 	var result ecdsa.PrivateKey
 
 	// TODO: IMPLEMENT
-
-	sigKeyBytes, _ := base64.StdEncoding.DecodeString(privKey.SigSK)
-	sigKey, err := x509.ParseECPrivateKey(sigKeyBytes)
-
+	sigKeyBytes, err := base64.StdEncoding.DecodeString(privKey.SigSK)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	result = *sigKey
+	fmt.Println(sigKeyBytes)
+	// sigKey, err := x509.ParseECPrivateKey(sigKeyBytes)
+	sigKey, err := x509.ParsePKCS8PrivateKey(sigKeyBytes)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	result = *sigKey.(*ecdsa.PrivateKey)
 
 	return result
 }
@@ -561,7 +566,8 @@ func decryptMessage(payload string, senderUsername string, senderPubKey *PubKeyS
 
 	// Decoding recipient's private key
 	eskByte, _ := base64.StdEncoding.DecodeString(recipientPrivKey.EncSK)
-	eskECDSA, _ := x509.ParseECPrivateKey(eskByte)
+	eskECDSAIF, _ := x509.ParsePKCS8PrivateKey(eskByte)
+	eskECDSA := *eskECDSAIF.(*ecdsa.PrivateKey)
 	esk, err := eskECDSA.ECDH()
 	if err != nil {
 		log.Fatal(err)
@@ -573,7 +579,32 @@ func decryptMessage(payload string, senderUsername string, senderPubKey *PubKeyS
 		log.Fatal(err)
 	}
 
-	fmt.Println(ssk)
+	// hashing ssk to get key 'K'
+	h = sha256.New()
+	h.Write([]byte(ssk))
+	K := h.Sum(nil)
+
+	cipher, err := chacha20.NewUnauthenticatedCipher(K, make([]byte, chacha20.NonceSize)) // nonce size = 12
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Decode C2
+	C2_, err := base64.StdEncoding.DecodeString(decrypted.C2)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	M_ := make([]byte, len(C2_))
+	cipher.XORKeyStream(M_, []byte(C2_))
+
+	Menc := base64.StdEncoding.EncodeToString(M_)
+	Mdec, err := base64.StdEncoding.DecodeString(Menc)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(string(Mdec))
 	_ = epk
 
 	return nil, nil
@@ -639,8 +670,15 @@ func encryptMessage(message []byte, senderUsername string, pubkey *PubKeyStruct)
 	crcTable := crc32.MakeTable(crc32.IEEE)
 	check := crc32.Checksum([]byte(M_), crcTable)
 
+	// convert check to byte[]
+	checkByte := make([]byte, 4)
+	_ = checkByte
+
+	// convert check to little endian encoding as byte[]
+	binary.LittleEndian.PutUint32(checkByte, check)
+
 	// constructing M''
-	M__ := M_ + strconv.Itoa(int(check))
+	M__ := M_ + string(checkByte)
 
 	// constructing C2
 	cipher, err := chacha20.NewUnauthenticatedCipher(K, make([]byte, chacha20.NonceSize)) // nonce size = 12
@@ -790,7 +828,7 @@ func generatePublicKey() (PubKeyStruct, PrivKeyStruct, error) {
 		log.Fatal("Unable to Generate Encryption Key!!")
 	}
 	encPubKey := &encKeys.PublicKey
-	encPrivKeyBytes, err := x509.MarshalECPrivateKey(encKeys)
+	encPrivKeyBytes, err := x509.MarshalPKCS8PrivateKey(encKeys)
 	if err != nil {
 		log.Fatal("Unable to Generate Private Encryption Byte Key!!")
 	}
@@ -809,7 +847,7 @@ func generatePublicKey() (PubKeyStruct, PrivKeyStruct, error) {
 		log.Fatal("Unable to Generate Signing Key!!")
 	}
 	sigPubKey := &sigKeys.PublicKey
-	sigPrivKeyBytes, err := x509.MarshalECPrivateKey(sigKeys)
+	sigPrivKeyBytes, err := x509.MarshalPKCS8PrivateKey(sigKeys)
 	if err != nil {
 		log.Fatal("Unable to Generate Private Signing Byte Key!!")
 	}
