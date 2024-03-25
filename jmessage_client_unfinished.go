@@ -550,7 +550,31 @@ func decryptMessage(payload string, senderUsername string, senderPubKey *PubKeyS
 		log.Fatal("Can't Verify the signature!!")
 	}
 
-	fmt.Println("\n-----------\n", valid)
+	// Decode C1
+	C1Byte, _ := base64.StdEncoding.DecodeString(decrypted.C1)
+	epkIF, _ := x509.ParsePKIXPublicKey(C1Byte)
+	epkECDSA := epkIF.(*ecdsa.PublicKey)
+	epk, err := epkECDSA.ECDH()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Decoding recipient's private key
+	eskByte, _ := base64.StdEncoding.DecodeString(recipientPrivKey.EncSK)
+	eskECDSA, _ := x509.ParseECPrivateKey(eskByte)
+	esk, err := eskECDSA.ECDH()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Generating shared secret
+	ssk, err := esk.ECDH(epk)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(ssk)
+	_ = epk
 
 	return nil, nil
 }
@@ -594,6 +618,8 @@ func encryptMessage(message []byte, senderUsername string, pubkey *PubKeyStruct)
 	if err != nil {
 		fmt.Println(err)
 	}
+
+	fmt.Println(sharedSecret)
 
 	// creating 'K'
 	h := sha256.New()
