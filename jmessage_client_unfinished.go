@@ -11,7 +11,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
-	b64 "encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -351,7 +350,7 @@ func sendMessageToServer(sender string, recipient string, message []byte, readRe
 		username + "/" + apiKey
 
 	// Format the message as a JSON object and increment the message ID counter
-	msg := MessageStruct{sender, recipient, messageIDCounter, readReceiptID, b64.StdEncoding.EncodeToString(message), "", "", ""}
+	msg := MessageStruct{sender, recipient, messageIDCounter, readReceiptID, base64.StdEncoding.EncodeToString(message), "", "", ""}
 	messageIDCounter++
 
 	body, err := json.Marshal(msg)
@@ -510,7 +509,7 @@ func decryptMessage(payload string, senderUsername string, senderPubKey *PubKeyS
 
 	var decrypted CiphertextStruct
 
-	messageDecoded, err := b64.StdEncoding.DecodeString(payload)
+	messageDecoded, err := base64.StdEncoding.DecodeString(payload)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -822,14 +821,14 @@ func main() {
 	flag.Parse()
 
 	// Set the server protocol to http or https
-	if noTLS == false {
+	if !noTLS {
 		serverProtocol = "https"
 	} else {
 		serverProtocol = "http"
 	}
 
 	// If self-signed certificates are allowed, enable weak TLS certificate validation globally
-	if strictTLS == false {
+	if !strictTLS {
 		fmt.Println("Security warning: TLS certificate validation is disabled!")
 		http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	}
@@ -838,7 +837,7 @@ func main() {
 	serverDomainAndPort = serverDomain + ":" + strconv.Itoa(serverPort)
 
 	// If we are registering a new username, let's do that first
-	if doUserRegister == true {
+	if doUserRegister {
 		fmt.Println("Registering new user...")
 		err := registerUserWithServer(username, password)
 		if err != nil {
@@ -872,12 +871,12 @@ func main() {
 
 	// Main command loop
 	fmt.Println("Jmessage Go Client, enter command or help")
-	for running == true {
+	for running {
 		var input string
 		var err error
 
 		// If we're not in headless mode, read a command in
-		if headlessMode == false {
+		if !headlessMode {
 			fmt.Print("> ")
 
 			input, err = reader.ReadString('\n')
