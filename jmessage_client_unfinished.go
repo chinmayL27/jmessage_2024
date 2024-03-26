@@ -178,6 +178,11 @@ func uploadFileToServer(filename string) (string, error) {
 	r.Header.Set("Content-Type", writer.FormDataContentType())
 	client := &http.Client{}
 	resp, err := client.Do(r)
+	if err != nil {
+		// Handle error
+		fmt.Println("Error while performing DO:", err)
+		return "", err
+	}
 	defer resp.Body.Close()
 
 	// Read the response body
@@ -460,7 +465,103 @@ func registerPublicKeyWithServer(username string, pubKeyEncoded PubKeyStruct) er
 // and file hash, or an error.
 func encryptAttachment(plaintextFilePath string, ciphertextFilePath string) (string, string, error) {
 	// TODO: IMPLEMENT
-	return "", "", nil
+
+	// generate a random chacha key 'K'
+	Curve := ecdh.P256()
+	if Curve == nil {
+		log.Fatal("Unable to Curve!!")
+	}
+	esk, err := Curve.GenerateKey(rand.Reader)
+	if err != nil {
+		log.Fatal("Unable to Generate Encryption Key!!")
+	}
+	epk, err := esk.ECDH(esk.PublicKey())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	h := sha256.New()
+	h.Write([]byte(epk))
+	K := h.Sum(nil)
+
+	// read plaintext from file
+	plaintext, err := os.ReadFile(plaintextFilePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Encrypting using CHACHA20 under key 'K' and nonce 0
+	cipher, err := chacha20.NewUnauthenticatedCipher(K, make([]byte, chacha20.NonceSize)) // nonce_size = 12
+	if err != nil {
+		log.Fatal(err)
+	}
+	cipherText := make([]byte, len(plaintext))
+	cipher.XORKeyStream(cipherText, []byte(plaintext))
+
+	// hash the ciphertext
+	h = sha256.New()
+	h.Write([]byte(cipherText))
+	cipherHashed := h.Sum(nil)
+
+	// create ciphertext file
+	outFile, err := os.Create(ciphertextFilePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer outFile.Close() // Close the file when done (defer ensures it's called even if an error occurs)
+
+	// write ciphertext to ciphertext file
+	_, err = outFile.WriteString(string(cipherText))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// return 'k' and hash
+	return string(K), string(cipherHashed), nil
+}
+
+func decryptAttachment(K string, hash string, ciphertextFilePath string, plaintextFilePath string) {
+	// TODO: IMPLEMENT
+
+	// get ciphertext from file
+	cipherText, err := os.ReadFile(ciphertextFilePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// compute hash of ciphertext
+	h := sha256.New()
+	h.Write([]byte(cipherText))
+	cipherHashed := h.Sum(nil)
+
+	// verifies hash
+	if string(cipherHashed) != hash {
+		log.Fatal("Unable to verify the hash of ciphertext")
+	}
+
+	// decryption using chacha20 with 'K'
+	cipher, err := chacha20.NewUnauthenticatedCipher([]byte(K), make([]byte, chacha20.NonceSize)) // nonce_size = 12
+	if err != nil {
+		log.Fatal(err)
+	}
+	plainText := make([]byte, len(cipherText))
+	cipher.XORKeyStream(plainText, []byte(cipherText))
+
+	// Create plaintext file
+	outFile, err := os.Create(plaintextFilePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer outFile.Close() // Close the file when done (defer ensures it's called even if an error occurs)
+
+	// write to plaintext
+	_, err = outFile.WriteString(string(plainText))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// signal succesful writing to file
+	fmt.Println("File decrypted successfully and written at ", plaintextFilePath)
 }
 
 func decodePrivateSigningKey(privKey PrivKeyStruct) ecdsa.PrivateKey {
@@ -473,7 +574,6 @@ func decodePrivateSigningKey(privKey PrivKeyStruct) ecdsa.PrivateKey {
 	}
 
 	fmt.Println(sigKeyBytes)
-	// sigKey, err := x509.ParseECPrivateKey(sigKeyBytes)
 	sigKey, err := x509.ParsePKCS8PrivateKey(sigKeyBytes)
 	if err != nil {
 		log.Fatal(err)
@@ -489,17 +589,10 @@ func ECDSASign(message []byte, privKey PrivKeyStruct) []byte {
 	// TODO: IMPLEMENT
 
 	// decoding signing key
-	// sigKeyBytes, _ := base64.StdEncoding.DecodeString(privKey.SigSK)
-	// sigKey, err := x509.ParseECPrivateKey(sigKeyBytes)
-
-	// if err != nil {
-	// 	log.Fatal(err)
-	// }
 	sigKey := decodePrivateSigningKey(privKey)
 
 	// Signing toSign
 	sig, err := ecdsa.SignASN1(rand.Reader, &sigKey, message[:])
-
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -598,16 +691,34 @@ func decryptMessage(payload string, senderUsername string, senderPubKey *PubKeyS
 	M_ := make([]byte, len(C2_))
 	cipher.XORKeyStream(M_, []byte(C2_))
 
-	Menc := base64.StdEncoding.EncodeToString(M_)
-	Mdec, err := base64.StdEncoding.DecodeString(Menc)
-	if err != nil {
-		log.Fatal(err)
+	// calculate checksum'
+	crcTable := crc32.MakeTable(crc32.IEEE)
+	check_ := crc32.Checksum([]byte(M_[:(len(M_)-4)]), crcTable)
+
+	// convert check' to byte[]
+	checkByte := make([]byte, 4)
+	_ = checkByte
+
+	// convert check' to little endian encoding as byte[]
+	binary.LittleEndian.PutUint32(checkByte, check_)
+
+	// verify checksum
+	check := []byte(M_[(len(M_) - 4):])
+
+	if string(check) != string(checkByte) {
+		log.Fatal("checksum couldnot be verified")
 	}
 
-	fmt.Println(string(Mdec))
-	_ = epk
+	// verify sender
+	separatorIndex := bytes.IndexByte(M_, 0x3A)
+	if separatorIndex == -1 {
+		log.Fatal("invalid message format, couldn't find ':' ")
+	}
+	if senderUsername != string(M_[:separatorIndex]) {
+		log.Fatal("Can't verify sender username to be same")
+	}
 
-	return nil, nil
+	return M_, nil
 }
 
 // Encrypts a byte string under a (Base64-encoded) public string, and returns a
@@ -649,8 +760,6 @@ func encryptMessage(message []byte, senderUsername string, pubkey *PubKeyStruct)
 	if err != nil {
 		fmt.Println(err)
 	}
-
-	fmt.Println(sharedSecret)
 
 	// creating 'K'
 	h := sha256.New()
@@ -713,7 +822,9 @@ func encryptMessage(message []byte, senderUsername string, pubkey *PubKeyStruct)
 func decryptMessages(messageArray []MessageStruct) {
 	// TODO: IMPLEMENT
 
-	for _, msg := range messageArray {
+	// new case for attachments if decrypted successfully for attachments
+
+	for i, msg := range messageArray {
 		body := getKeyFromServer(msg.From)
 
 		var result PubKeyStruct
@@ -725,10 +836,12 @@ func decryptMessages(messageArray []MessageStruct) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		msg.decrypted = string(message)
-		// fmt.Println(msg) //, "\n-------------\n", body, "\n-------------\n", result)
-	}
+		messageArray[i].decrypted = string(message)
 
+		// for attachments, before reciept, dowload the ciphertext and decrypt it
+
+		// call send_message_to_server(msg.To, msg.From, empty []byte, 1)
+	}
 }
 
 // Download any attachments in a message list
@@ -998,6 +1111,25 @@ func main() {
 			} else {
 				fmt.Println("NOT IMPLEMENTED YET")
 				// TODO: IMPLEMENT
+
+				// encrpyt attachment
+				K, hash, err := encryptAttachment(parts[2], parts[2]+"encryption")
+				if err != nil {
+					log.Fatal(err)
+				}
+
+				// upload encrypted file to server
+				url, err := uploadFileToServer(parts[2] + "encryption")
+				if err != nil {
+					log.Fatal(err)
+				}
+
+				// format URL
+				MSGURL := fmt.Sprintf("MSGURL=%s?KEY=%s?H=%s", url, K, hash)
+				_ = MSGURL
+
+				// send message containing 'K', hash, url (format specified)
+
 			}
 		case "QUIT":
 			running = false
