@@ -1113,13 +1113,14 @@ func main() {
 				// TODO: IMPLEMENT
 
 				// encrpyt attachment
-				K, hash, err := encryptAttachment(parts[2], parts[2]+"encryption")
+				ciphertextFilePath := getTempFilePath()
+				K, hash, err := encryptAttachment(parts[2], ciphertextFilePath)
 				if err != nil {
 					log.Fatal(err)
 				}
 
 				// upload encrypted file to server
-				url, err := uploadFileToServer(parts[2] + "encryption")
+				url, err := uploadFileToServer(ciphertextFilePath)
 				if err != nil {
 					log.Fatal(err)
 				}
