@@ -520,7 +520,7 @@ func encryptAttachment(plaintextFilePath string, ciphertextFilePath string) (str
 	return string(K), string(cipherHashed), nil
 }
 
-func decryptAttachment(K string, hash string, ciphertextFilePath string, plaintextFilePath string) {
+func decryptAttachment(K string, hash string, ciphertextFilePath string, plaintextFilePath string) error {
 	// TODO: IMPLEMENT
 
 	// get ciphertext from file
@@ -562,6 +562,8 @@ func decryptAttachment(K string, hash string, ciphertextFilePath string, plainte
 
 	// signal succesful writing to file
 	fmt.Println("File decrypted successfully and written at ", plaintextFilePath)
+
+	return nil
 }
 
 func decodePrivateSigningKey(privKey PrivKeyStruct) ecdsa.PrivateKey {
@@ -822,8 +824,6 @@ func encryptMessage(message []byte, senderUsername string, pubkey *PubKeyStruct)
 func decryptMessages(messageArray []MessageStruct) {
 	// TODO: IMPLEMENT
 
-	// new case for attachments if decrypted successfully for attachments
-
 	for i, msg := range messageArray {
 		body := getKeyFromServer(msg.From)
 
@@ -831,16 +831,46 @@ func decryptMessages(messageArray []MessageStruct) {
 		if err := json.Unmarshal(body, &result); err != nil { // Parse []byte to go struct pointer
 			log.Fatal("Can not unmarshal JSON")
 		}
-
 		message, err := decryptMessage(msg.Payload, msg.From, &result, &globalPrivKey)
+		if err != nil {
+			fmt.Println(err)
+			err := sendMessageToServer(msg.To, msg.From, make([]byte, 0), 1)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+
+		if len(message) >= 10 && strings.HasPrefix(string(message), ">>>MSGURL=") {
+			// >>>MSGURL=<url>?KEY=<KEY>?H=<H>
+
+			// get k, hash and url from the message
+			messageSplit := strings.Split(string(message), "=")
+			url := messageSplit[1][:strings.IndexByte(messageSplit[1], '?')]
+			K := messageSplit[2][:strings.IndexByte(messageSplit[2], '?')]
+			hash := messageSplit[3]
+
+			// download attachment to local
+			ciphertextFilePath := getTempFilePathEnc()
+			err := downloadFileFromServer(url, ciphertextFilePath)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			// decrypt attachment
+			plaintextFilePath := getTempFilePathDec()
+			err = decryptAttachment(K, hash, ciphertextFilePath, plaintextFilePath)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+		} else {
+			messageArray[i].decrypted = string(message)
+		}
+
+		err = sendMessageToServer(msg.To, msg.From, make([]byte, 0), 1)
 		if err != nil {
 			log.Fatal(err)
 		}
-		messageArray[i].decrypted = string(message)
-
-		// for attachments, before reciept, dowload the ciphertext and decrypt it
-
-		// call send_message_to_server(msg.To, msg.From, empty []byte, 1)
 	}
 }
 
@@ -922,10 +952,16 @@ func printUserList(userArray []UserStruct) {
 	fmt.Printf("\n")
 }
 
-func getTempFilePath() string {
+func getTempFilePathEnc() string {
 	randBytes := make([]byte, 16)
 	rand.Read(randBytes)
 	return filepath.Join(os.TempDir(), "ENCFILE_"+hex.EncodeToString(randBytes)+".dat")
+}
+
+func getTempFilePathDec() string {
+	randBytes := make([]byte, 16)
+	rand.Read(randBytes)
+	return filepath.Join(os.TempDir(), "DECFILE_"+hex.EncodeToString(randBytes)+".txt")
 }
 
 // Generate a fresh public key struct, containing encryption and signing keys
@@ -1109,12 +1145,13 @@ func main() {
 			if len(parts) < 3 {
 				fmt.Println("Correct usage: attach <username> <filename>")
 			} else {
-				fmt.Println("NOT IMPLEMENTED YET")
 				// TODO: IMPLEMENT
 
 				// encrpyt attachment
-				ciphertextFilePath := getTempFilePath()
-				K, hash, err := encryptAttachment(parts[2], ciphertextFilePath)
+				ciphertextFilePath := getTempFilePathEnc()
+				plaintTextFilePath := string(strings.TrimSpace(parts[2]))
+
+				K, hash, err := encryptAttachment(plaintTextFilePath, ciphertextFilePath)
 				if err != nil {
 					log.Fatal(err)
 				}
@@ -1126,11 +1163,15 @@ func main() {
 				}
 
 				// format URL
-				MSGURL := fmt.Sprintf("MSGURL=%s?KEY=%s?H=%s", url, K, hash)
-				_ = MSGURL
+				MSGURL := fmt.Sprintf(">>>MSGURL=%s?KEY=%s?H=%s", url, K, hash)
 
-				// send message containing 'K', hash, url (format specified)
-
+				// encrypt and send MSGURL
+				err = doReadAndSendMessage(parts[1], MSGURL)
+				if err != nil {
+					fmt.Println("--- ERROR: message send failed")
+				} else {
+					fmt.Println("--- message sent successfully!")
+				}
 			}
 		case "QUIT":
 			running = false
