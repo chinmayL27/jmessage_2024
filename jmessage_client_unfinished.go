@@ -900,11 +900,6 @@ func decryptMessages(messageArray []MessageStruct) {
 		message, err := decryptMessage(msg.Payload, msg.From, &result, &globalPrivKey)
 		if err != nil {
 			fmt.Println(err)
-			err := sendMessageToServer(msg.To, msg.From, make([]byte, 0), 1)
-			if err != nil {
-				log.Fatal(err)
-			}
-			fmt.Println(err)
 			return
 		}
 
