@@ -316,6 +316,9 @@ func getMessagesFromServer() ([]MessageStruct, error) {
 		fmt.Println("Can not unmarshal JSON")
 	}
 
+	// download any attachments before decoding
+	// downloadAttachments(result) // TODO: include url in database
+
 	// TODO: Implement decryption
 	decryptMessages(result)
 
@@ -410,6 +413,22 @@ func doReadAndSendMessage(recipient string, messageBody string) error {
 
 	// Now encrypt the message
 	encryptedMessage := encryptMessage([]byte(messageBody), username, pubkey)
+
+	// Finally, send the encrypted message to the server
+	return sendMessageToServer(username, recipient, []byte(encryptedMessage), 0)
+}
+
+// encountered error "marshalling the msg struct loses url"
+func doSendMessageWithURL(recipient string, MSGURL string, _ string) error {
+	// First, obtain the recipient's public key
+	pubkey, err := getPublicKeyFromServer(recipient)
+	if err != nil {
+		fmt.Printf("Could not obtain public key for user %s.\n", recipient)
+		return err
+	}
+
+	// Now encrypt the message
+	encryptedMessage := encryptMessage([]byte(MSGURL), username, pubkey)
 
 	// Finally, send the encrypted message to the server
 	return sendMessageToServer(username, recipient, []byte(encryptedMessage), 0)
@@ -575,7 +594,6 @@ func decodePrivateSigningKey(privKey PrivKeyStruct) ecdsa.PrivateKey {
 		log.Fatal(err)
 	}
 
-	fmt.Println(sigKeyBytes)
 	sigKey, err := x509.ParsePKCS8PrivateKey(sigKeyBytes)
 	if err != nil {
 		log.Fatal(err)
@@ -720,7 +738,7 @@ func decryptMessage(payload string, senderUsername string, senderPubKey *PubKeyS
 		log.Fatal("Can't verify sender username to be same")
 	}
 
-	return M_, nil
+	return M_[separatorIndex+1 : (len(M_) - 4)], nil
 }
 
 // Encrypts a byte string under a (Base64-encoded) public string, and returns a
@@ -831,6 +849,10 @@ func decryptMessages(messageArray []MessageStruct) {
 		if err := json.Unmarshal(body, &result); err != nil { // Parse []byte to go struct pointer
 			log.Fatal("Can not unmarshal JSON")
 		}
+		if msg.Payload == "" {
+			return
+		}
+
 		message, err := decryptMessage(msg.Payload, msg.From, &result, &globalPrivKey)
 		if err != nil {
 			fmt.Println(err)
@@ -849,23 +871,33 @@ func decryptMessages(messageArray []MessageStruct) {
 			K := messageSplit[2][:strings.IndexByte(messageSplit[2], '?')]
 			hash := messageSplit[3]
 
+			messageArray[i].url = url
+
 			// download attachment to local
-			ciphertextFilePath := getTempFilePathEnc()
-			err := downloadFileFromServer(url, ciphertextFilePath)
-			if err != nil {
-				log.Fatal(err)
+			os.Mkdir(attachmentsDir, 0755)
+
+			// Make a random filename
+			randBytes := make([]byte, 16)
+			rand.Read(randBytes)
+			localPath := filepath.Join(attachmentsDir, "attachment_"+hex.EncodeToString(randBytes)+".dat")
+
+			err := downloadFileFromServer(url, localPath)
+			if err == nil {
+				messageArray[i].localPath = localPath
+			} else {
+				fmt.Println(err)
 			}
 
 			// decrypt attachment
 			plaintextFilePath := getTempFilePathDec()
-			err = decryptAttachment(K, hash, ciphertextFilePath, plaintextFilePath)
+			err = decryptAttachment(K, hash, localPath, plaintextFilePath)
 			if err != nil {
 				log.Fatal(err)
 			}
 
-		} else {
-			messageArray[i].decrypted = string(message)
 		}
+
+		messageArray[i].decrypted = string(message)
 
 		err = sendMessageToServer(msg.To, msg.From, make([]byte, 0), 1)
 		if err != nil {
@@ -1122,7 +1154,6 @@ func main() {
 				fmt.Print("Unable to fetch messages: ")
 				fmt.Print(err)
 			} else {
-				downloadAttachments(messageList)
 				printMessageList(messageList)
 			}
 		case "LIST":
@@ -1166,7 +1197,7 @@ func main() {
 				MSGURL := fmt.Sprintf(">>>MSGURL=%s?KEY=%s?H=%s", url, K, hash)
 
 				// encrypt and send MSGURL
-				err = doReadAndSendMessage(parts[1], MSGURL)
+				err = doSendMessageWithURL(parts[1], MSGURL, url)
 				if err != nil {
 					fmt.Println("--- ERROR: message send failed")
 				} else {
