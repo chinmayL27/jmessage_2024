@@ -758,18 +758,18 @@ func decryptMessage(payload string, senderUsername string, senderPubKey *PubKeyS
 
 	if string(check) != string(checkByte) {
 		fmt.Println("checksum couldnot be verified")
-		return make([]byte, 0), err
+		return make([]byte, 0), errors.New("checksum couldnot be verified")
 	}
 
 	// verify sender
 	separatorIndex := bytes.IndexByte(M_, 0x3A)
 	if separatorIndex == -1 {
 		fmt.Println("invalid message format, couldn't find ':' ")
-		return make([]byte, 0), err
+		return make([]byte, 0), errors.New("invalid message format, couldn't find ':' ")
 	}
 	if senderUsername != string(M_[:separatorIndex]) {
 		fmt.Println("Can't verify sender username to be same")
-		return make([]byte, 0), err
+		return make([]byte, 0), errors.New("Can't verify sender username to be same")
 	}
 
 	return M_[separatorIndex+1 : (len(M_) - 4)], nil
@@ -1234,13 +1234,13 @@ func main() {
 
 				K, hash, err := encryptAttachment(plaintTextFilePath, ciphertextFilePath)
 				if err != nil {
-					log.Fatal(err)
+					fmt.Println(err)
 				}
 
 				// upload encrypted file to server
 				url, err := uploadFileToServer(ciphertextFilePath)
 				if err != nil {
-					log.Fatal(err)
+					fmt.Println(err)
 				}
 
 				// format URL
