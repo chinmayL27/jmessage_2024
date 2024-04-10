@@ -1506,7 +1506,7 @@ func main() {
 		case "QUIT":
 			running = false
 		case "HELP":
-			fmt.Println("Commands are:\n\tsend <username> - send a message\n\tget - get new messages\n\tlist - print a list of all users\n\tattack - attack a particular message\n\tquit - exit")
+			fmt.Println("Commands are:\n\tsend <username> - send a message\n\tget - get new messages\n\tlist - print a list of all users\n\tattack - attack a particular message\n\tbob - run bob bot to recieve messages every 20 ms\n\tquit - exit")
 
 		default:
 			fmt.Println("Unrecognized command\n")
